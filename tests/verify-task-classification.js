@@ -9,7 +9,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-assert(manifest.version === "3.2.0.8", "extension version must be bumped for task classification fixes");
+assert(manifest.version === "3.2.0.9", "extension version must be bumped for task classification fixes");
 assert(script.includes("_isQuizTaskPage"), "script must explicitly detect chapter quiz pages");
 assert(script.includes("_getTaskKind"), "script must classify task pages before choosing video/reading/quiz behavior");
 assert(script.includes("_hasVideoTaskSignal"), "script must treat video task markers as stronger evidence than reading labels");

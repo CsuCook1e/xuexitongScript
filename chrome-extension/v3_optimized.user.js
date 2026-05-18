@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         学习通自动刷课脚本 V3 稳定版
 // @namespace    local.codex.xuexitong
-// @version      3.2.0.8
+// @version      3.2.0.9
 // @description  按原版框架自动播放、自动下一节、章节测验自动跳过
 // @author       Codex
 // @match        *://mooc1.chaoxing.com/mycourse/studentstudy*
@@ -354,6 +354,94 @@
             _isCurrentTaskPointComplete() {
                 return this._frameTextIncludes(window, '\u4efb\u52a1\u70b9\u5df2\u5b8c\u6210');
             },
+            _isCompleteTaskText(text) {
+                const normalized = this._normalizeText(text);
+                const completeTexts = [
+                    '\u4efb\u52a1\u70b9\u5df2\u5b8c\u6210',
+                    '\u5df2\u5b8c\u6210',
+                ];
+                const incompleteTexts = [
+                    '\u5f85\u5b8c\u6210',
+                    '\u672a\u5b8c\u6210',
+                    '\u672a\u5b66\u4e60',
+                    '\u8fdb\u884c\u4e2d',
+                ];
+                return completeTexts.some((value) => normalized.includes(value))
+                    && !incompleteTexts.some((value) => normalized.includes(value));
+            },
+            _isCompleteTaskClass(value) {
+                const className = String(value || '').toLowerCase();
+                return /(ans-)?job-?(finished|finish|done|complete|completed)|finished|complete|completed|done/.test(className)
+                    && !/(unfinished|incomplete|uncomplete|doing|todo|wait|waiting)/.test(className);
+            },
+            _elementHasSingleVideoFrame(el) {
+                if (!el) return false;
+                try {
+                    return $(el).find('iframe').filter((_, frame) => {
+                        const attrs = [
+                            frame.className,
+                            frame.id,
+                            frame.name,
+                            frame.title,
+                            frame.getAttribute?.('src'),
+                        ].join(' ').toLowerCase();
+                        return attrs.includes('ans-insertvideo') || attrs.includes('insertvideo') || attrs.includes('video');
+                    }).length <= 1;
+                } catch (e) {
+                    return false;
+                }
+            },
+            _isVideoFrameTaskComplete(frame) {
+                if (!frame) return false;
+                const collectText = (el) => {
+                    try {
+                        return `${el.className || ''} ${el.title || ''} ${el.getAttribute?.('aria-label') || ''} ${$(el).text() || ''}`;
+                    } catch (e) {
+                        return '';
+                    }
+                };
+                const checkElement = (el) => {
+                    if (!el) return false;
+                    const text = collectText(el);
+                    return this._isCompleteTaskText(text) || this._isCompleteTaskClass(text);
+                };
+
+                try {
+                    const docText = frame.contentWindow?.document?.body?.innerText || '';
+                    if (this._isCompleteTaskText(docText)) return true;
+                } catch (e) {}
+
+                const candidates = [];
+                let current = frame;
+                for (let depth = 0; current && depth < 6; depth++) {
+                    candidates.push(current);
+                    current = current.parentElement;
+                }
+
+                for (const candidate of candidates) {
+                    if (candidate !== frame && !this._elementHasSingleVideoFrame(candidate)) continue;
+                    if (checkElement(candidate)) return true;
+                    try {
+                        const siblings = [];
+                        if (candidate.previousElementSibling) siblings.push(candidate.previousElementSibling);
+                        if (candidate.nextElementSibling) siblings.push(candidate.nextElementSibling);
+                        if (siblings.some((sibling) => checkElement(sibling))) return true;
+                    } catch (e) {}
+                }
+                return false;
+            },
+            _getNextPendingVideoTaskIndex(frames, startIndex = 0) {
+                for (let i = Math.max(0, startIndex); i < frames.length; i++) {
+                    if (!this._isVideoFrameTaskComplete(frames.get(i))) {
+                        return i;
+                    }
+                    console.log(`[Xuexitong Script 1x] video task ${i + 1}/${frames.length} already complete, skipping`);
+                }
+                return -1;
+            },
+            _areAllVideoTasksComplete(frames) {
+                return frames.length > 0 && this._getNextPendingVideoTaskIndex(frames, 0) === -1;
+            },
             _getReadingScrollTargets() {
                 const targets = [];
                 const seen = new Set();
@@ -551,6 +639,14 @@
                 try {
                     if (this._handleTaskPointDialog('before-play')) {
                         setTimeout(() => this.play(), 1500);
+                        return;
+                    }
+                    const videoFrames = this._getVideoFrames();
+                    if (this._areAllVideoTasksComplete(videoFrames)) {
+                        this._stopReadingScroll();
+                        this._resetVideoTaskState();
+                        console.log('[Xuexitong Script 1x] all video tasks in this section are complete, moving to next unit');
+                        setTimeout(() => this.nextUnit(), 800);
                         return;
                     }
                     const el = this._getVideoEl();
@@ -825,6 +921,16 @@
                         if (this._currentVideoTaskIndex < 0) {
                             this._currentVideoTaskIndex = 0;
                         }
+                        const pendingIndex = this._getNextPendingVideoTaskIndex(frameObj, this._currentVideoTaskIndex);
+                        if (pendingIndex < 0) {
+                            this._currentVideoTaskIndex = frameObj.length;
+                            return null;
+                        }
+                        if (pendingIndex !== this._currentVideoTaskIndex) {
+                            this._detachVideoEventHandlers();
+                            this._videoEl = null;
+                            this._currentVideoTaskIndex = pendingIndex;
+                        }
                         const findVideo = (frame) => {
                             try {
                                 return $(frame).contents().find('video#video_html5_api,video').get(0) || null;
@@ -857,8 +963,9 @@
 
                 const frames = this._getVideoFrames();
                 this._videoTaskCount = frames.length;
-                if (this._currentVideoTaskIndex + 1 < frames.length) {
-                    this._currentVideoTaskIndex++;
+                const nextPendingIndex = this._getNextPendingVideoTaskIndex(frames, this._currentVideoTaskIndex + 1);
+                if (nextPendingIndex >= 0) {
+                    this._currentVideoTaskIndex = nextPendingIndex;
                     this._detachVideoEventHandlers();
                     this._videoEl = null;
                     console.log(`[Xuexitong Script 1x] switching to video task ${this._currentVideoTaskIndex + 1}/${frames.length}`);

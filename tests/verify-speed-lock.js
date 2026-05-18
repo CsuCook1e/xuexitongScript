@@ -15,6 +15,6 @@ assert(/playbackRate:\s*1\b/.test(script), "default playbackRate must be 1");
 assert(script.includes("_applyPlaybackRate"), "script must centralize playback-rate enforcement");
 assert(script.includes("ratechange"), "script must listen for player rate changes");
 assert(/_applyPlaybackRate\(video\)/.test(script), "monitoring loop must re-apply the configured playback rate");
-assert(manifest.version === "3.2.0.8", "extension version must be bumped so Chrome shows the updated build");
+assert(manifest.version === "3.2.0.9", "extension version must be bumped so Chrome shows the updated build");
 
 console.log("speed lock checks passed");

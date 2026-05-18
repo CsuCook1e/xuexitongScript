@@ -9,7 +9,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-assert(manifest.version === "3.2.0.8", "extension version must be bumped for dialog throttling");
+assert(manifest.version === "3.2.0.9", "extension version must be bumped for dialog throttling");
 assert(script.includes("_lastTaskPointDialogClickAt"), "dialog handler must track last click time");
 assert(script.includes("_isLikelyVisibleDialog"), "dialog handler must filter to likely modal layers");
 assert(script.includes("taskDialogClickCooldownMs"), "dialog handler must use a click cooldown");
