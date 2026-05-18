@@ -9,7 +9,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-assert(manifest.version === "3.2.0.7", "extension version must be bumped for no-skip/frame-guard fix");
+assert(manifest.version === "3.2.0.8", "extension version must be bumped for no-skip/frame-guard fix");
 assert(script.includes("\\u53bb\\u5b66\\u4e60"), "unfinished-task dialog must target the go-study button");
 assert(script.includes("\\u53bb\\u5b8c\\u6210"), "unfinished-task dialog must also target go-complete wording");
 assert(!script.includes("closing unfinished-task dialog via next section"), "unfinished-task dialog must not click next section");

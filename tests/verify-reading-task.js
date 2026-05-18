@@ -9,7 +9,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-assert(manifest.version === "3.2.0.7", "extension version must be bumped for reading-task automation");
+assert(manifest.version === "3.2.0.8", "extension version must be bumped for reading-task automation");
 assert(script.includes("readingScrollInterval"), "reading automation must have an interval config");
 assert(script.includes("_handleReadingTask"), "script must route non-video reading tasks before skipping");
 assert(script.includes("_startReadingScroll"), "script must start a gradual reading scroll loop");

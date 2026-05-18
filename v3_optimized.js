@@ -26,6 +26,7 @@
                 readingScrollStepPx: 420,
                 readingBottomGraceMs: 5000,
                 readingMaxRounds: 90,
+                videoPendingRetryMs: 1200,
                 guardNoProgressMs: 7000,
                 guardResumeCooldownMs: 1500,
             },
@@ -118,6 +119,9 @@
                 el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
                 return true;
             },
+            _normalizeText(value) {
+                return String(value || '').replace(/\s+/g, '');
+            },
             _getDialogButtonCandidates(dialog) {
                 const elements = [];
                 if (dialog && dialog.length) {
@@ -164,23 +168,32 @@
                     const taskPointText = '\u5f53\u524d\u7ae0\u8282\u8fd8\u6709\u4efb\u52a1\u70b9\u672a\u5b8c\u6210';
                     const goStudyText = '\u53bb\u5b66\u4e60';
                     const goCompleteText = '\u53bb\u5b8c\u6210';
-                    const normalize = (value) => String(value || '').replace(/\s+/g, '');
+                    const nextSectionText = '\u4e0b\u4e00\u8282';
+                    const isQuizTask = this._isQuizTaskPage();
+                    const targetTexts = isQuizTask ? [nextSectionText] : [goStudyText, goCompleteText];
+                    const normalize = (value) => this._normalizeText(value);
                     const dialogs = $('[role="dialog"]:visible,.layui-layer:visible,.wayer:visible,.wayer-dialog:visible,.modal:visible,.dialog:visible,[class*="dialog"]:visible,[class*="modal"]:visible,[class*="layer"]:visible,[class*="pop"]:visible').filter((_, el) => {
                         const text = normalize($(el).text());
-                        return this._isLikelyVisibleDialog(el) && text.includes(taskPointText) && (text.includes(goStudyText) || text.includes(goCompleteText));
+                        return this._isLikelyVisibleDialog(el) && text.includes(taskPointText) && targetTexts.some((targetText) => text.includes(targetText));
                     });
                     if (!dialogs.length) return false;
 
                     const dialog = dialogs.last();
-                    const goStudyButton = this._getDialogButtonCandidates(dialog).filter((_, el) => {
+                    const targetButton = this._getDialogButtonCandidates(dialog).filter((_, el) => {
                         const text = normalize($(el).text());
-                        return text === goStudyText || text === goCompleteText || ((text.includes(goStudyText) || text.includes(goCompleteText)) && $(el).children().length === 0);
+                        return targetTexts.some((targetText) => {
+                            return text === targetText || (text.includes(targetText) && $(el).children().length === 0);
+                        });
                     }).last();
-                    if (!goStudyButton.length) return false;
+                    if (!targetButton.length) return false;
 
-                    console.log(`[Xuexitong Script 1x] unfinished-task dialog handled as go study (${reason})`);
+                    console.log(`[Xuexitong Script 1x] unfinished-task dialog handled as ${isQuizTask ? 'next section' : 'go study'} (${reason})`);
                     this._lastTaskPointDialogClickAt = now;
-                    return this._dispatchClick(goStudyButton.get(0));
+                    if (isQuizTask) {
+                        this._stepSwitchPending = true;
+                        this._stepSwitchAt = now;
+                    }
+                    return this._dispatchClick(targetButton.get(0));
                 } catch (e) {
                     console.warn('[Xuexitong Script 1x] dialog handling failed:', e);
                     return false;
@@ -193,6 +206,10 @@
                 const nativeConfirm = window.confirm.bind(window);
                 window.confirm = (message) => {
                     if (String(message || '').includes(taskPointText)) {
+                        if (this._isQuizTaskPage()) {
+                            console.log('[Xuexitong Script 1x] native unfinished-task confirm handled as quiz skip');
+                            return false;
+                        }
                         console.log('[Xuexitong Script 1x] native unfinished-task confirm handled as go study');
                         return true;
                     }
@@ -210,7 +227,69 @@
                 const prevTitle = document.getElementsByClassName('prev_title')[0];
                 return prevTitle ? (prevTitle.title || prevTitle.textContent || '').trim() : '';
             },
-            _isReadingTaskPage() {
+            _getCurrentTaskText() {
+                const parts = [document.title, this._getCurrentStepTitle()];
+                const activeSelectors = [
+                    '.prev_title',
+                    '.posCatalog_active .posCatalog_name',
+                    '.prev_white.active',
+                    '.prev_white.selected',
+                    '.prev_white.current',
+                    '.prev_white.on',
+                    '.prev_white[aria-selected="true"]',
+                    '[class*="prev"][class*="active"]:visible',
+                    '[class*="prev"][class*="select"]:visible',
+                    '[class*="prev"][class*="current"]:visible',
+                    '[class*="prev"][class*="cur"]:visible',
+                    '[class*="prev"][class*="on"]:visible',
+                    'li[aria-selected="true"]:visible',
+                ];
+                try {
+                    $(activeSelectors.join(',')).each((_, el) => {
+                        parts.push(el.title || $(el).attr('title') || $(el).text());
+                    });
+                } catch (e) {}
+                return this._normalizeText(parts.join(' '));
+            },
+            _hasVideoTaskSignal() {
+                if (this._videoEl || this._findVideoFramesInWindow(window).length > 0) {
+                    return true;
+                }
+                const videoText = '\u89c6\u9891';
+                if (this._getCurrentTaskText().includes(videoText)) {
+                    return true;
+                }
+                try {
+                    if ($('video').length > 0) return true;
+                    return $('iframe').filter((_, frame) => {
+                        const attrs = [
+                            frame.className,
+                            frame.id,
+                            frame.name,
+                            frame.title,
+                            frame.getAttribute?.('src'),
+                        ].join(' ').toLowerCase();
+                        return attrs.includes('video') || attrs.includes('insertvideo') || attrs.includes('ans-insertvideo');
+                    }).length > 0;
+                } catch (e) {
+                    return false;
+                }
+            },
+            _isQuizTaskPage(taskText = this._getCurrentTaskText()) {
+                const quizText = '\u7ae0\u8282\u6d4b\u9a8c';
+                if (taskText.includes(quizText)) return true;
+                try {
+                    const pageText = this._normalizeText(document.body?.innerText || '');
+                    return pageText.includes(quizText)
+                        || (pageText.includes('\u9898\u91cf') && (pageText.includes('\u5355\u9009\u9898') || pageText.includes('\u591a\u9009\u9898')));
+                } catch (e) {
+                    return false;
+                }
+            },
+            _isReadingTaskPage(taskText = this._getCurrentTaskText()) {
+                if (this._hasVideoTaskSignal() || this._isQuizTaskPage(taskText)) {
+                    return false;
+                }
                 const labels = [
                     '\u6559\u6750',
                     '\u9605\u8bfb',
@@ -218,14 +297,29 @@
                     '\u56fe\u6587',
                     '\u8d44\u6599',
                 ];
-                const currentStepTitle = this._getCurrentStepTitle();
-                if (labels.some((label) => currentStepTitle.includes(label))) {
+                if (labels.some((label) => taskText.includes(label))) {
                     return true;
                 }
-                const tabText = $('.prev_white:visible,[class*="prev"]:visible,li[title]:visible').map((_, el) => {
-                    return `${el.title || ''} ${$(el).text() || ''}`;
-                }).get().join(' ');
-                return labels.some((label) => tabText.includes(label));
+                try {
+                    return $('iframe,[class*="reader"],[class*="document"],[class*="book"],[class*="pdf"]').filter((_, el) => {
+                        const attrs = [
+                            el.className,
+                            el.id,
+                            el.title,
+                            el.getAttribute?.('src'),
+                        ].join(' ').toLowerCase();
+                        return attrs.includes('reader') || attrs.includes('document') || attrs.includes('book') || attrs.includes('pdf');
+                    }).length > 0;
+                } catch (e) {
+                    return false;
+                }
+            },
+            _getTaskKind() {
+                const taskText = this._getCurrentTaskText();
+                if (this._hasVideoTaskSignal()) return 'video';
+                if (this._isQuizTaskPage(taskText)) return 'quiz';
+                if (this._isReadingTaskPage(taskText)) return 'reading';
+                return 'unknown';
             },
             _frameTextIncludes(win, needle, depth = 0) {
                 if (depth > 4) return false;
@@ -332,7 +426,9 @@
                 if (this._isCurrentTaskPointComplete()) {
                     this._finishReadingTask('task-complete-after-scroll');
                 } else if (bottomWaitMs >= this.configs.readingBottomGraceMs || this._readingRounds >= this.configs.readingMaxRounds) {
-                    this._finishReadingTask('bottom-reached');
+                    console.log('[Xuexitong Script 1x] reading bottom reached, waiting for task completion');
+                    this._readingRounds = 0;
+                    this._readingBottomSince = Date.now();
                 }
             },
             _startReadingScroll() {
@@ -348,7 +444,7 @@
                 return true;
             },
             _handleReadingTask() {
-                if (!this._isReadingTaskPage()) return false;
+                if (this._getTaskKind() !== 'reading') return false;
                 if (this._isCurrentTaskPointComplete()) {
                     this._finishReadingTask('already-complete');
                     return true;
@@ -446,7 +542,26 @@
                     }
                     const el = this._getVideoEl();
                     if (el == null) {
+                        const taskKind = this._getTaskKind();
+                        if (taskKind === 'video') {
+                            this._stopReadingScroll();
+                            console.log('[Xuexitong Script 1x] video task detected but video element is still loading');
+                            setTimeout(() => this.play(), this.configs.videoPendingRetryMs);
+                            return;
+                        }
                         if (this._handleReadingTask()) {
+                            return;
+                        }
+                        if (taskKind === 'quiz') {
+                            console.log('[Xuexitong Script 1x] chapter quiz detected, trying to skip');
+                            this._dispatchClick($('#prevNextFocusNext').get(0));
+                            setTimeout(() => {
+                                if (this._handleTaskPointDialog('after-quiz-next')) {
+                                    setTimeout(() => this.play(), 1500);
+                                    return;
+                                }
+                                this.play();
+                            }, 800);
                             return;
                         }
                         if (this._advanceLearningStep()) {
@@ -500,10 +615,11 @@
                     return true;
                 }
 
-                const prevTitle = document.getElementsByClassName('prev_title')[0];
-                const currentStepTitle = prevTitle ? (prevTitle.title || prevTitle.textContent || '').trim() : '';
+                const currentTaskText = this._getCurrentTaskText();
+                const quizText = '\u7ae0\u8282\u6d4b\u9a8c';
+                const videoText = '\u89c6\u9891';
 
-                if (currentStepTitle === '章节测验' || currentStepTitle === '视频') {
+                if (currentTaskText.includes(quizText) || currentTaskText.includes(videoText) || this._hasVideoTaskSignal()) {
                     return false;
                 }
 
@@ -517,8 +633,8 @@
                 };
 
                 const videoTab = $('.prev_white:visible').filter((_, el) => {
-                    const text = ($(el).text() || '').replace(/\s+/g, '');
-                    return text === '2视频' || text === '视频';
+                    const text = this._normalizeText($(el).text());
+                    return text === `2${videoText}` || text === videoText || text.includes(videoText);
                 }).get(0);
                 if (clickElement(videoTab, '“视频”页签')) {
                     return true;
@@ -565,14 +681,11 @@
                             this._delayedNextUnitTimer = null;
                         }
                     }).catch((e) => {
-                        console.error('静音播放也失败:', e);
-                        if (this._delayedNextUnitTimer) {
-                            clearTimeout(this._delayedNextUnitTimer);
+                        console.error('静音播放也失败，将继续等待视频而不是切换下一节:', e);
+                        if (this._tryTimes < this.configs.maxRetries) {
+                            this._tryTimes++;
+                            setTimeout(() => this.play(), this.configs.retryInterval);
                         }
-                        this._delayedNextUnitTimer = setTimeout(() => {
-                            this._delayedNextUnitTimer = null;
-                            this._handleVideoTaskEnded();
-                        }, 3000);
                     });
                 }
             },
@@ -653,8 +766,14 @@
                     const doc = win.document;
                     const frames = Array.from(doc.querySelectorAll('iframe'));
                     frames.forEach((frame) => {
-                        const className = String(frame.className || '');
-                        if (className.includes('ans-insertvideo-online')) {
+                        const frameAttrs = [
+                            frame.className,
+                            frame.id,
+                            frame.name,
+                            frame.title,
+                            frame.getAttribute?.('src'),
+                        ].join(' ').toLowerCase();
+                        if (frameAttrs.includes('ans-insertvideo-online') || frameAttrs.includes('insertvideo') || frameAttrs.includes('video')) {
                             result.push(frame);
                         }
                         try {
@@ -693,16 +812,29 @@
                         if (this._currentVideoTaskIndex < 0) {
                             this._currentVideoTaskIndex = 0;
                         }
-                        this._videoEl = frameObj.eq(this._currentVideoTaskIndex).contents().find('video#video_html5_api').get(0);
+                        const findVideo = (frame) => {
+                            try {
+                                return $(frame).contents().find('video#video_html5_api,video').get(0) || null;
+                            } catch (e) {
+                                if (e && e.name === 'SecurityError') return null;
+                                console.warn('[Xuexitong Script 1x] video frame not ready:', e);
+                                return null;
+                            }
+                        };
+                        for (let i = this._currentVideoTaskIndex; i < frameObj.length; i++) {
+                            const video = findVideo(frameObj.get(i));
+                            if (video) {
+                                this._currentVideoTaskIndex = i;
+                                this._videoEl = video;
+                                break;
+                            }
+                        }
                     } catch (e) {
                         console.error('获取视频元素失败:', e);
                         return null;
                     }
                 }
-                if (!this._videoEl) {
-                    throw new Error('视频组件Video未加载完成');
-                }
-                return this._videoEl;
+                return this._videoEl || null;
             },
             _handleVideoTaskEnded() {
                 if (this._handlingVideoEnd) return;

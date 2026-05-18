@@ -17,6 +17,6 @@ assert(script.includes("_handleTaskPointDialog"), "script must handle unfinished
 assert(script.includes("\\u5f53\\u524d\\u7ae0\\u8282\\u8fd8\\u6709\\u4efb\\u52a1\\u70b9\\u672a\\u5b8c\\u6210"), "dialog handler must match the unfinished-task-point text");
 assert(script.includes("\\u53bb\\u5b66\\u4e60"), "dialog handler must choose the go-study button");
 assert(script.includes("window.confirm"), "script must guard native confirm dialogs with the same prompt");
-assert(manifest.version === "3.2.0.7", "extension version must be bumped for the flow fix");
+assert(manifest.version === "3.2.0.8", "extension version must be bumped for the flow fix");
 
 console.log("flow fix checks passed");
