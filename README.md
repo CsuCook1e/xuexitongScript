@@ -42,7 +42,7 @@
 
 ```javascript
 configs: {
-    playbackRate: 1.5,
+    playbackRate: 1,
     autoplay: true,
     retryInterval: 2000,
     maxRetries: 10,
